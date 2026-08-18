@@ -1,288 +1,206 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
 from database import get_connection
 
 
 app = FastAPI(
     title="Task API",
-    description="CRUD API with MySQL",
-    version="2.0 new connected database with the fastapi"
+    version="3.0 using postgresql"
 )
 
 
+# -------------------------
+# Request model
+# -------------------------
 
-class TaskCreate(BaseModel):
-    title:str
-
-
-
-class TaskUpdate(BaseModel):
-    title:str | None = None
-    done:bool | None = None
+class Task(BaseModel):
+    title: str
+    done: bool = False
 
 
+# -------------------------
+# Create table
+# -------------------------
 
-@app.get("/")
-def home():
+@app.on_event("startup")
+def create_table():
 
-    return {
-        "name":"Task API",
-        "database":"MySQL",
-        "version":"2.0"
-    }
+    db = get_connection()
 
+    cursor = db.cursor()
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            done BOOLEAN DEFAULT FALSE
+        )
+    """)
 
-@app.get("/health")
-def health():
-
-    return {
-        "status":"ok"
-    }
-
-
-
-# GET ALL TASKS
-
-@app.get("/tasks")
-def get_tasks(
-    done:bool | None=None,
-    search:str | None=None
-):
-
-    db=get_connection()
-
-    cursor=db.cursor(dictionary=True)
-
-
-    query="SELECT * FROM tasks WHERE 1=1"
-
-    values=[]
-
-
-
-    if done is not None:
-
-        query += " AND done=%s"
-
-        values.append(done)
-
-
-
-    if search:
-
-        query += " AND title LIKE %s"
-
-        values.append(f"%{search}%")
-
-
-    cursor.execute(query,values)
-
-
-    tasks=cursor.fetchall()
-
+    db.commit()
 
     cursor.close()
     db.close()
 
+
+# -------------------------
+# Test database
+# -------------------------
+
+@app.get("/test-db")
+def test_db():
+
+    try:
+
+        db = get_connection()
+
+        cursor = db.cursor()
+
+        cursor.execute("SELECT current_database()")
+
+        result = cursor.fetchone()
+
+        cursor.close()
+        db.close()
+
+        return {
+            "status": "connected",
+            "database": result[0]
+        }
+
+    except Exception as e:
+
+        return {
+            "error": str(e)
+        }
+
+
+# -------------------------
+# GET all tasks
+# -------------------------
+
+@app.get("/tasks")
+def get_tasks():
+
+    db = get_connection()
+
+    cursor = db.cursor()
+
+    cursor.execute(
+        "SELECT id, title, done FROM tasks ORDER BY id"
+    )
+
+    rows = cursor.fetchall()
+
+    cursor.close()
+    db.close()
+
+    tasks = []
+
+    for row in rows:
+
+        tasks.append({
+            "id": row[0],
+            "title": row[1],
+            "done": row[2]
+        })
 
     return tasks
 
 
-
-
-
-# GET SINGLE TASK
+# -------------------------
+# GET task by ID
+# -------------------------
 
 @app.get("/tasks/{task_id}")
-def get_task(task_id:int):
+def get_task(task_id: int):
 
     db = get_connection()
 
-    cursor= db.cursor (dictionary=True)
+    cursor = db.cursor()
 
-    cursor.execute( 
-        "Select * FROM tasks where id=%s", 
+    cursor.execute(
+        "SELECT id, title, done FROM tasks WHERE id = %s",
         (task_id,)
     )
 
-    task = cursor.fetchone()
+    row = cursor.fetchone()
+
     cursor.close()
     db.close()
-    
-    if task is None:
 
+    if row is None:
         raise HTTPException(
             status_code=404,
             detail="Task not found"
         )
 
-
-    return task
-
-
-
-
-
-# CREATE TASK
-
-@app.post("/tasks",status_code=201)
-def create_task(task:TaskCreate):
-
-
-    if not task.title.strip():
-
-        raise HTTPException(
-            status_code=400,
-            detail="Title cannot be empty"
-        )
-
-
-    db=get_connection()
-
-    cursor=db.cursor(dictionary=True)
-
-
-
-    cursor.execute(
-        """
-        INSERT INTO tasks(title,done)
-        VALUES(%s,%s)
-        """,
-        (task.title,False)
-    )
-
-
-    db.commit()
-
-
-    task_id=cursor.lastrowid
-
-
-
-    cursor.close()
-    db.close()
-
-
-
     return {
-
-        "id":task_id,
-        "title":task.title,
-        "done":False
-
+        "id": row[0],
+        "title": row[1],
+        "done": row[2]
     }
 
 
+# -------------------------
+# CREATE task
+# -------------------------
 
+@app.post("/tasks")
+def create_task(task: Task):
 
+    db = get_connection()
 
-# UPDATE TASK
-
-@app.put("/tasks/{task_id}")
-def update_task(
-    task_id:int,
-    updated_task:TaskUpdate
-):
-
-
-    db=get_connection()
-
-    cursor=db.cursor(dictionary=True)
-
-
+    cursor = db.cursor()
 
     cursor.execute(
-        "SELECT * FROM tasks WHERE id=%s",
-        (task_id,)
+        """
+        INSERT INTO tasks (title, done)
+        VALUES (%s, %s)
+        RETURNING id
+        """,
+        (task.title, task.done)
     )
 
+    task_id = cursor.fetchone()[0]
 
-    task=cursor.fetchone()
+    db.commit()
 
+    cursor.close()
+    db.close()
 
-
-    if task is None:
-
-        cursor.close()
-        db.close()
-
-        raise HTTPException(
-            status_code=404,
-            detail="Task not found"
-        )
+    return {
+        "id": task_id,
+        "title": task.title,
+        "done": task.done
+    }
 
 
+# -------------------------
+# UPDATE task
+# -------------------------
 
-    title = updated_task.title if updated_task.title is not None else task["title"]
+@app.put("/tasks/{task_id}")
+def update_task(task_id: int, task: Task):
 
-    done = updated_task.done if updated_task.done is not None else task["done"]
+    db = get_connection()
 
-
-
-    if not title.strip():
-
-        raise HTTPException(
-            status_code=400,
-            detail="Title cannot be empty"
-        )
-
-
+    cursor = db.cursor()
 
     cursor.execute(
         """
         UPDATE tasks
-        SET title=%s, done=%s
-        WHERE id=%s
+        SET title = %s, done = %s
+        WHERE id = %s
+        RETURNING id
         """,
-        (title,done,task_id)
+        (task.title, task.done, task_id)
     )
 
+    result = cursor.fetchone()
 
-    db.commit()
-
-
-
-    cursor.close()
-    db.close()
-
-
-
-    return {
-
-        "id":task_id,
-        "title":title,
-        "done":done
-
-    }
-
-
-
-
-
-# DELETE TASK
-
-@app.delete("/tasks/{task_id}",status_code=204)
-def delete_task(task_id:int):
-
-
-    db=get_connection()
-
-    cursor=db.cursor()
-
-
-
-    cursor.execute(
-        "SELECT id FROM tasks WHERE id=%s",
-        (task_id,)
-    )
-
-
-    task=cursor.fetchone()
-
-
-
-    if task is None:
+    if result is None:
 
         cursor.close()
         db.close()
@@ -292,110 +210,55 @@ def delete_task(task_id:int):
             detail="Task not found"
         )
 
-
-
-    cursor.execute(
-        "DELETE FROM tasks WHERE id=%s",
-        (task_id,)
-    )
-
-
     db.commit()
 
-
     cursor.close()
     db.close()
-
-
-
-    return
-
-
-
-
-
-# STATS
-
-@app.get("/stats")
-def stats():
-
-    db=get_connection()
-
-    cursor=db.cursor(dictionary=True)
-
-
-
-    cursor.execute(
-        "SELECT COUNT(*) AS total FROM tasks"
-    )
-
-    total=cursor.fetchone()["total"]
-
-
-
-    cursor.execute(
-        "SELECT COUNT(*) AS done FROM tasks WHERE done=1"
-    )
-
-    done=cursor.fetchone()["done"]
-
-
-
-    cursor.close()
-    db.close()
-
-
 
     return {
-
-        "total":total,
-        "done":done,
-        "open":total-done
-
+        "id": task_id,
+        "title": task.title,
+        "done": task.done
     }
 
 
+# -------------------------
+# DELETE task
+# -------------------------
 
+@app.delete("/tasks/{task_id}")
+def delete_task(task_id: int):
 
+    db = get_connection()
 
-# RESET DATABASE
-
-@app.post("/reset")
-def reset():
-
-
-    db=get_connection()
-
-    cursor=db.cursor()
-
-
-
-    cursor.execute(
-        "DELETE FROM tasks"
-    )
-
+    cursor = db.cursor()
 
     cursor.execute(
         """
-        INSERT INTO tasks(title,done)
-        VALUES
-        ('Learn FastAPI',0),
-        ('Build CRUD API',0),
-        ('Upload project on GitHub',1)
-        """
+        DELETE FROM tasks
+        WHERE id = %s
+        RETURNING id
+        """,
+        (task_id,)
     )
 
+    result = cursor.fetchone()
+
+    if result is None:
+
+        cursor.close()
+        db.close()
+
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
 
     db.commit()
-
 
     cursor.close()
     db.close()
 
-
-
     return {
-
-        "message":"Tasks reset successfully"
-
+        "message": "Task deleted successfully"
     }

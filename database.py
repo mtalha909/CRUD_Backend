@@ -1,13 +1,12 @@
-import mysql.connector
+import os
+import psycopg
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def get_connection():
-
-    connection = mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="Password",
-        database="task_db"
-    )
-
+    connection = psycopg.connect(DATABASE_URL)
     return connection
