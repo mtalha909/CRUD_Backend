@@ -10,18 +10,13 @@ app = FastAPI(
 )
 
 
-# -------------------------
 # Request model
-# -------------------------
+
 
 class Task(BaseModel):
     title: str
     done: bool = False
 
-
-# -------------------------
-# Create table
-# -------------------------
 
 @app.on_event("startup")
 def create_table():
@@ -43,10 +38,7 @@ def create_table():
     cursor.close()
     db.close()
 
-
-# -------------------------
-# Test database
-# -------------------------
+#Testing database
 
 @app.get("/test-db")
 def test_db():
@@ -76,9 +68,6 @@ def test_db():
         }
 
 
-# -------------------------
-# GET all tasks
-# -------------------------
 
 @app.get("/tasks")
 def get_tasks():
@@ -109,9 +98,6 @@ def get_tasks():
     return tasks
 
 
-# -------------------------
-# GET task by ID
-# -------------------------
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: int):
@@ -143,9 +129,6 @@ def get_task(task_id: int):
     }
 
 
-# -------------------------
-# CREATE task
-# -------------------------
 
 @app.post("/tasks")
 def create_task(task: Task):
@@ -177,9 +160,6 @@ def create_task(task: Task):
     }
 
 
-# -------------------------
-# UPDATE task
-# -------------------------
 
 @app.put("/tasks/{task_id}")
 def update_task(task_id: int, task: Task):
@@ -222,9 +202,6 @@ def update_task(task_id: int, task: Task):
     }
 
 
-# -------------------------
-# DELETE task
-# -------------------------
 
 @app.delete("/tasks/{task_id}")
 def delete_task(task_id: int):
